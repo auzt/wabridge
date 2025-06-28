@@ -71,7 +71,6 @@ function switchQRTab(tab) {
     }
 }
 
-// Show QR Code modal
 function showQR(sessionId, apiKey) {
     document.getElementById('qrModal').style.display = 'block';
 
@@ -85,75 +84,130 @@ function showQR(sessionId, apiKey) {
         </div>
     `;
 
-    // Fetch QR code with enhanced error handling
-    fetch(`../../api/auth.php?action=qr`, {
+    // PERBAIKAN: Construct URL dengan parameter yang benar
+    const apiUrl = `../../api/auth.php?action=qr&api_key=${encodeURIComponent(apiKey)}&session_id=${encodeURIComponent(sessionId)}`;
+
+    // Fetch QR code dengan enhanced error handling
+    fetch(apiUrl, {
         method: 'GET',
         headers: {
-            'X-API-Key': apiKey,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+            // Tidak perlu X-API-Key di header karena sudah di URL parameter
         }
     })
         .then(response => {
+            console.log('Response status:', response.status);
+            console.log('Response headers:', response.headers);
+
             // Check if response is JSON
             const contentType = response.headers.get('content-type');
             if (!contentType || !contentType.includes('application/json')) {
-                throw new Error('Server returned non-JSON response. Please check if Node.js API is running.');
+                // Log response text untuk debugging
+                return response.text().then(text => {
+                    console.error('Non-JSON response:', text);
+                    throw new Error('Server returned non-JSON response. Response: ' + text.substring(0, 200));
+                });
             }
+
+            if (!response.ok) {
+                throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
+            }
+
             return response.json();
         })
         .then(data => {
+            console.log('QR Response data:', data);
+
             if (data.success && data.data && data.data.qr_code) {
                 document.getElementById('qrContent').innerHTML = `
-                    <div style="text-align: center;">
-                        <img src="data:image/png;base64,${data.data.qr_code}" 
-                             alt="QR Code" 
-                             style="max-width: 300px; width: 100%; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 1rem;">
-                        <p style="margin: 1rem 0; color: #333;">
-                            <strong>📱 Scan this QR code with WhatsApp</strong>
-                        </p>
-                        <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">
-                            Open WhatsApp → Settings → Linked Devices → Link a Device
-                        </p>
-                        <button class="btn btn-primary" onclick="refreshQR('${sessionId}', '${apiKey}')">
-                            🔄 Refresh QR
-                        </button>
-                    </div>
-                `;
+                <div style="text-align: center;">
+                    <img src="data:image/png;base64,${data.data.qr_code}" 
+                         alt="QR Code" 
+                         style="max-width: 300px; width: 100%; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 1rem;">
+                    <p style="margin: 1rem 0; color: #333;">
+                        <strong>📱 Scan this QR code with WhatsApp</strong>
+                    </p>
+                    <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">
+                        Open WhatsApp → Settings → Linked Devices → Link a Device
+                    </p>
+                    <button class="btn btn-primary" onclick="refreshQR('${sessionId}', '${apiKey}')">
+                        🔄 Refresh QR
+                    </button>
+                </div>
+            `;
             } else {
+                const errorMessage = data.error || 'QR code not available';
                 document.getElementById('qrContent').innerHTML = `
-                    <div style="text-align: center; padding: 2rem;">
-                        <div style="font-size: 3rem; margin-bottom: 1rem;">❌</div>
-                        <p style="color: #e74c3c; font-weight: 500;">QR code not available</p>
-                        <p style="font-size: 0.9rem; color: #666; margin: 1rem 0;">
-                            ${data.error || 'Please try connecting the device first or check if Node.js API is running.'}
-                        </p>
+                <div style="text-align: center; padding: 2rem;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">❌</div>
+                    <p style="color: #e74c3c; font-weight: 500;">QR code not available</p>
+                    <p style="font-size: 0.9rem; color: #666; margin: 1rem 0;">
+                        ${errorMessage}
+                    </p>
+                    <div style="margin-top: 1rem;">
                         <button class="btn btn-primary" onclick="refreshQR('${sessionId}', '${apiKey}')">
                             🔄 Retry
                         </button>
+                        <button class="btn btn-secondary" onclick="checkNodeStatus()">
+                            🔧 Check Node.js Status
+                        </button>
                     </div>
-                `;
+                </div>
+            `;
             }
         })
         .catch(error => {
             console.error('QR Code Error:', error);
             document.getElementById('qrContent').innerHTML = `
-                <div style="text-align: center; padding: 2rem;">
-                    <div style="font-size: 3rem; margin-bottom: 1rem;">⚠️</div>
-                    <p style="color: #e74c3c; font-weight: 500;">Error loading QR code</p>
-                    <p style="font-size: 0.9rem; color: #666; margin: 1rem 0;">
-                        ${error.message}
-                    </p>
+            <div style="text-align: center; padding: 2rem;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">⚠️</div>
+                <p style="color: #e74c3c; font-weight: 500;">Error loading QR code</p>
+                <p style="font-size: 0.9rem; color: #666; margin: 1rem 0;">
+                    ${error.message}
+                </p>
+                <div style="margin-top: 1rem;">
                     <button class="btn btn-primary" onclick="refreshQR('${sessionId}', '${apiKey}')">
                         🔄 Retry
                     </button>
+                    <button class="btn btn-secondary" onclick="checkNodeStatus()">
+                        🔧 Check Node.js Status
+                    </button>
                 </div>
-            `;
+                <details style="margin-top: 1rem; text-align: left;">
+                    <summary style="cursor: pointer; color: #666;">Show debug info</summary>
+                    <pre style="background: #f5f5f5; padding: 1rem; margin-top: 0.5rem; border-radius: 4px; font-size: 0.8rem;">${error.stack || error.message}</pre>
+                </details>
+            </div>
+        `;
         });
 }
 
-// Refresh QR Code
+// Fungsi untuk refresh QR
 function refreshQR(sessionId, apiKey) {
     showQR(sessionId, apiKey);
+}
+
+// Fungsi untuk check status Node.js
+function checkNodeStatus() {
+    fetch('../../api/status.php?action=health', {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showToast('✅ Node.js API is running', 'success');
+            } else {
+                showToast('❌ Node.js API is not responding', 'error');
+            }
+        })
+        .catch(error => {
+            showToast('❌ Cannot connect to Node.js API', 'error');
+            console.error('Node health check error:', error);
+        });
 }
 
 // Close QR Modal

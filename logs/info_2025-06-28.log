@@ -13,3 +13,10 @@
 [2025-06-28 21:10:37] INFO: Device deleted - Context: {"device_id":4,"device_name":"dsa"}
 [2025-06-28 21:10:42] INFO: Device created - Context: {"device_name":"test","session_id":"wa_1751119842_8111","note":""}
 [2025-06-28 21:10:52] INFO: Device status updated - Context: {"device_id":5,"status":"connecting","phone_number":null}
+[2025-06-28 21:58:02] INFO: Device deleted - Context: {"device_id":5,"device_name":"test"}
+[2025-06-28 22:07:32] INFO: User logged out - Context: {"username":"admin"}
+[2025-06-28 22:07:38] INFO: User logged in - Context: {"username":"admin"}
+[2025-06-28 22:07:49] INFO: Device created - Context: {"device_id":"6","device_name":"saA","session_id":"wa_1751123269_7118"}
+[2025-06-28 22:07:49] INFO: Device Created - Context: {"device_id":"6","device_name":"saA","user_id":1,"username":"admin"}
+[2025-06-28 22:13:39] INFO: User logged out - Context: {"username":"admin"}
+[2025-06-28 22:15:58] INFO: User logged in - Context: {"username":"admin"}

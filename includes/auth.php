@@ -87,7 +87,16 @@ class Auth
     public function requireLogin()
     {
         if (!$this->isLoggedIn()) {
-            header('Location: /admin/login.php');
+            // Deteksi apakah sedang di subfolder admin atau bukan
+            $currentPath = $_SERVER['REQUEST_URI'];
+
+            if (strpos($currentPath, '/admin/') !== false) {
+                // Jika sudah di folder admin, redirect ke login.php
+                header('Location: ../login.php');
+            } else {
+                // Jika di root atau folder lain, redirect ke admin/login.php
+                header('Location: admin/login.php');
+            }
             exit;
         }
     }

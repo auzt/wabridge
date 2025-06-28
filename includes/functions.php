@@ -7,6 +7,12 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/config.php';
 
+
+/**
+ * WhatsApp Bridge - Complete DeviceManager Class
+ * Ganti isi class DeviceManager di includes/functions.php dengan yang ini
+ */
+
 class DeviceManager
 {
     private $db;
@@ -16,75 +22,200 @@ class DeviceManager
         $this->db = Database::getInstance();
     }
 
-    // Create new device
-    public function createDevice($deviceName, $sessionId, $webhookUrl = null, $userId = null, $note = null)
+    /**
+     * Create new device - FIXED VERSION
+     */
+    public function createDevice($data)
     {
         try {
+            // Handle array parameter
+            if (is_array($data)) {
+                $deviceName = $data['device_name'];
+                $webhookUrl = $data['webhook_url'] ?? null;
+                $note = $data['note'] ?? null;
+                $userId = $data['created_by'];
+            } else {
+                // Handle old parameter format for backward compatibility
+                $deviceName = $data;
+                $webhookUrl = func_num_args() > 2 ? func_get_arg(2) : null;
+                $userId = func_num_args() > 3 ? func_get_arg(3) : null;
+                $note = func_num_args() > 4 ? func_get_arg(4) : null;
+            }
+
+            $sessionId = generateSessionId();
             $apiKey = generateApiKey();
             $deviceToken = generateDeviceToken();
-            $userId = $userId ?: ($_SESSION['user_id'] ?? 1);
 
-            $deviceId = $this->db->execute(
-                "INSERT INTO devices (device_name, session_id, device_token, api_key, webhook_url, note, created_by) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+            $result = $this->db->execute(
+                "INSERT INTO devices (device_name, session_id, device_token, api_key, webhook_url, note, created_by, status) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'disconnected')",
                 [$deviceName, $sessionId, $deviceToken, $apiKey, $webhookUrl, $note, $userId]
             );
 
-            if ($deviceId) {
+            if ($result) {
+                $deviceId = $this->db->lastInsertId();
+
                 logInfo("Device created", [
+                    'device_id' => $deviceId,
                     'device_name' => $deviceName,
-                    'session_id' => $sessionId,
-                    'note' => $note
+                    'session_id' => $sessionId
                 ]);
 
                 return [
-                    'id' => $this->db->lastInsertId(),
-                    'device_name' => $deviceName,
-                    'session_id' => $sessionId,
-                    'device_token' => $deviceToken,
-                    'api_key' => $apiKey,
-                    'webhook_url' => $webhookUrl,
-                    'note' => $note
+                    'success' => true,
+                    'data' => [
+                        'device_id' => $deviceId,
+                        'id' => $deviceId,
+                        'device_name' => $deviceName,
+                        'session_id' => $sessionId,
+                        'device_token' => $deviceToken,
+                        'api_key' => $apiKey,
+                        'webhook_url' => $webhookUrl,
+                        'note' => $note,
+                        'status' => 'disconnected'
+                    ]
                 ];
             }
 
-            return false;
+            return [
+                'success' => false,
+                'error' => 'Failed to insert device into database'
+            ];
         } catch (Exception $e) {
             logError("Error creating device", ['error' => $e->getMessage()]);
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Check if device name exists for user
+     */
+    public function getDeviceByName($deviceName, $userId)
+    {
+        try {
+            return $this->db->fetch(
+                "SELECT * FROM devices WHERE device_name = ? AND created_by = ? AND status != 'inactive'",
+                [$deviceName, $userId]
+            );
+        } catch (Exception $e) {
+            logError("Error checking device name", ['error' => $e->getMessage()]);
             return false;
         }
     }
 
-    // Get device by ID
+    /**
+     * Get device by ID
+     */
     public function getDevice($deviceId)
     {
-        return $this->db->fetch(
-            "SELECT d.*, u.username as created_by_username FROM devices d 
-             JOIN users u ON d.created_by = u.id 
-             WHERE d.id = ?",
-            [$deviceId]
-        );
+        try {
+            return $this->db->fetch(
+                "SELECT d.*, u.username as created_by_username FROM devices d 
+                 JOIN users u ON d.created_by = u.id 
+                 WHERE d.id = ?",
+                [$deviceId]
+            );
+        } catch (Exception $e) {
+            logError("Error getting device", ['error' => $e->getMessage()]);
+            return false;
+        }
     }
 
-    // Get device by session ID
+    /**
+     * Get device by session ID
+     */
     public function getDeviceBySessionId($sessionId)
     {
-        return $this->db->fetch(
-            "SELECT * FROM devices WHERE session_id = ?",
-            [$sessionId]
-        );
+        try {
+            return $this->db->fetch(
+                "SELECT * FROM devices WHERE session_id = ? AND status != 'inactive'",
+                [$sessionId]
+            );
+        } catch (Exception $e) {
+            logError("Error getting device by session", ['error' => $e->getMessage()]);
+            return false;
+        }
     }
 
-    // Get device by API key
+    /**
+     * Get device by API key
+     */
     public function getDeviceByApiKey($apiKey)
     {
-        return $this->db->fetch(
-            "SELECT * FROM devices WHERE api_key = ?",
-            [$apiKey]
-        );
+        try {
+            return $this->db->fetch(
+                "SELECT * FROM devices WHERE api_key = ? AND status != 'inactive'",
+                [$apiKey]
+            );
+        } catch (Exception $e) {
+            logError("Error getting device by API key", ['error' => $e->getMessage()]);
+            return false;
+        }
     }
 
-    // Update device status
+    /**
+     * Update device
+     */
+    public function updateDevice($deviceId, $data)
+    {
+        try {
+            $setParts = [];
+            $params = [];
+
+            if (isset($data['webhook_url'])) {
+                $setParts[] = "webhook_url = ?";
+                $params[] = $data['webhook_url'];
+            }
+
+            if (isset($data['note'])) {
+                $setParts[] = "note = ?";
+                $params[] = $data['note'];
+            }
+
+            if (isset($data['device_name'])) {
+                $setParts[] = "device_name = ?";
+                $params[] = $data['device_name'];
+            }
+
+            if (empty($setParts)) {
+                return [
+                    'success' => false,
+                    'error' => 'No data to update'
+                ];
+            }
+
+            $setParts[] = "updated_at = NOW()";
+            $params[] = $deviceId;
+
+            $sql = "UPDATE devices SET " . implode(', ', $setParts) . " WHERE id = ?";
+            $result = $this->db->execute($sql, $params);
+
+            if ($result) {
+                return [
+                    'success' => true,
+                    'message' => 'Device updated successfully'
+                ];
+            }
+
+            return [
+                'success' => false,
+                'error' => 'Failed to update device'
+            ];
+        } catch (Exception $e) {
+            logError("Error updating device", ['error' => $e->getMessage()]);
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Update device status
+     */
     public function updateDeviceStatus($deviceId, $status, $phoneNumber = null, $qrCode = null)
     {
         try {
@@ -112,33 +243,125 @@ class DeviceManager
                     'status' => $status,
                     'phone_number' => $phoneNumber
                 ]);
+                return true;
             }
 
-            return $result > 0;
+            return false;
         } catch (Exception $e) {
             logError("Error updating device status", ['error' => $e->getMessage()]);
             return false;
         }
     }
 
-    // Get all devices
-    public function getAllDevices($userId = null)
+    /**
+     * Update webhook URL
+     */
+    public function updateWebhookUrl($deviceId, $webhookUrl)
     {
-        $sql = "SELECT d.*, u.username as created_by_username FROM devices d 
-                JOIN users u ON d.created_by = u.id";
-        $params = [];
+        try {
+            $result = $this->db->execute(
+                "UPDATE devices SET webhook_url = ?, updated_at = NOW() WHERE id = ?",
+                [$webhookUrl, $deviceId]
+            );
 
-        if ($userId) {
-            $sql .= " WHERE d.created_by = ?";
-            $params[] = $userId;
+            return $result > 0;
+        } catch (Exception $e) {
+            logError("Error updating webhook URL", ['error' => $e->getMessage()]);
+            return false;
         }
-
-        $sql .= " ORDER BY d.created_at DESC";
-
-        return $this->db->fetchAll($sql, $params);
     }
 
-    // Delete device
+    /**
+     * Get all devices
+     */
+    public function getAllDevices($userId = null)
+    {
+        try {
+            $sql = "SELECT d.*, u.username as created_by_username FROM devices d 
+                    JOIN users u ON d.created_by = u.id 
+                    WHERE d.status != 'inactive'";
+            $params = [];
+
+            if ($userId) {
+                $sql .= " AND d.created_by = ?";
+                $params[] = $userId;
+            }
+
+            $sql .= " ORDER BY d.created_at DESC";
+
+            return $this->db->fetchAll($sql, $params);
+        } catch (Exception $e) {
+            logError("Error getting all devices", ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
+
+    /**
+     * Get user devices with statistics
+     */
+    public function getUserDevices($userId)
+    {
+        try {
+            $devices = $this->getAllDevices($userId);
+
+            return [
+                'success' => true,
+                'data' => [
+                    'devices' => $devices,
+                    'total' => count($devices)
+                ]
+            ];
+        } catch (Exception $e) {
+            logError("Error getting user devices", ['error' => $e->getMessage()]);
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
+                'data' => ['devices' => [], 'total' => 0]
+            ];
+        }
+    }
+
+    /**
+     * Get device statistics
+     */
+    public function getDeviceStats($userId)
+    {
+        try {
+            $devices = $this->getAllDevices($userId);
+
+            $stats = [
+                'total' => 0,
+                'connected' => 0,
+                'connecting' => 0,
+                'disconnected' => 0,
+                'inactive' => 0
+            ];
+
+            foreach ($devices as $device) {
+                $stats['total']++;
+                $status = $device['status'] ?? 'disconnected';
+                if (isset($stats[$status])) {
+                    $stats[$status]++;
+                }
+            }
+
+            return [
+                'success' => true,
+                'data' => $stats
+            ];
+        } catch (Exception $e) {
+            logError("Error getting device stats", ['error' => $e->getMessage()]);
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
+                'data' => ['total' => 0, 'connected' => 0, 'connecting' => 0, 'disconnected' => 0, 'inactive' => 0]
+            ];
+        }
+    }
+
+    /**
+     * Delete device
+     */
     public function deleteDevice($deviceId)
     {
         try {
@@ -147,34 +370,26 @@ class DeviceManager
                 return false;
             }
 
-            $result = $this->db->execute("DELETE FROM devices WHERE id = ?", [$deviceId]);
+            // Soft delete - mark as inactive instead of hard delete
+            $result = $this->db->execute(
+                "UPDATE devices SET status = 'inactive', updated_at = NOW() WHERE id = ?",
+                [$deviceId]
+            );
+
+            // Or hard delete if preferred:
+            // $result = $this->db->execute("DELETE FROM devices WHERE id = ?", [$deviceId]);
 
             if ($result) {
                 logInfo("Device deleted", [
                     'device_id' => $deviceId,
                     'device_name' => $device['device_name']
                 ]);
+                return true;
             }
 
-            return $result > 0;
+            return false;
         } catch (Exception $e) {
             logError("Error deleting device", ['error' => $e->getMessage()]);
-            return false;
-        }
-    }
-
-    // Update webhook URL
-    public function updateWebhookUrl($deviceId, $webhookUrl)
-    {
-        try {
-            $result = $this->db->execute(
-                "UPDATE devices SET webhook_url = ? WHERE id = ?",
-                [$webhookUrl, $deviceId]
-            );
-
-            return $result > 0;
-        } catch (Exception $e) {
-            logError("Error updating webhook URL", ['error' => $e->getMessage()]);
             return false;
         }
     }

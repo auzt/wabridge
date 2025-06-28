@@ -36,3 +36,5 @@
 [2025-06-28 21:10:57] ERROR: Error getting QR code - Context: {"error":"Failed to get QR code"}
 [2025-06-28 21:11:01] ERROR: Error getting QR code - Context: {"error":"Failed to get QR code"}
 [2025-06-28 21:11:38] ERROR: Error getting QR code - Context: {"error":"Failed to get QR code"}
+[2025-06-28 21:58:02] ERROR: Error disconnecting session - Context: {"error":"Failed to disconnect session"}
+[2025-06-28 22:08:17] ERROR: Error connecting session - Context: {"error":"Invalid API Key"}

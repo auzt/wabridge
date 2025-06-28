@@ -2,7 +2,8 @@
 
 /**
  * WhatsApp Bridge - Device Management Form Handlers
- * File: admin/devices/handlers.php
+ * File: admin/device/handlers.php
+ * Complete rewrite - no duplicates
  */
 
 // Handle CSRF token refresh endpoint
@@ -189,16 +190,15 @@ function handleUpdateDevice()
 
             logInfo("Device Updated", [
                 'device_id' => $deviceId,
-                'user_id' => $currentUser['id'],
-                'changes' => ['webhook_url' => $webhookUrl, 'note' => $note]
+                'user_id' => $currentUser['id']
             ]);
         } else {
             $error = 'Failed to update device: ' . $result['error'];
         }
     } catch (Exception $e) {
         logError("Device Update Error", [
-            'error' => $e->getMessage(),
             'device_id' => $deviceId,
+            'error' => $e->getMessage(),
             'user_id' => $currentUser['id']
         ]);
         $error = 'An error occurred while updating the device. Please try again.';
@@ -226,36 +226,26 @@ function handleConnectDevice()
     }
 
     try {
-        // Check Node.js API availability
-        $healthCheck = $apiClient->healthCheck();
-        if (!$healthCheck['success']) {
-            $error = 'WhatsApp API service is not available. Please ensure Node.js API is running on ' . NODE_API_URL;
-            return;
-        }
+        $result = $apiClient->connectSession($device['session_id']);
 
-        // Try to create/connect session
-        $response = $apiClient->createSession($device['session_id']);
-
-        if ($response['success']) {
-            // Update device status
+        if ($result['success']) {
             $deviceManager->updateDeviceStatus($device['id'], 'connecting');
+            $success = 'Device connection initiated successfully.';
 
-            $success = 'Device connection initiated successfully. Please scan the QR code if needed.';
-
-            logInfo("Device Connection Initiated", [
+            logInfo("Device Connect Initiated", [
                 'device_id' => $device['id'],
                 'session_id' => $device['session_id'],
                 'user_id' => $currentUser['id']
             ]);
         } else {
-            $error = 'Failed to connect: ' . ($response['error'] ?? 'Unknown error from Node.js API');
+            $error = 'Failed to connect device: ' . ($result['error'] ?? 'Unknown error from Node.js API');
         }
     } catch (Exception $e) {
         logError("Device Connection Exception", [
             'device_id' => $device['id'],
             'error' => $e->getMessage()
         ]);
-        $error = 'Connection error: Make sure Node.js WhatsApp API is running on ' . NODE_API_URL;
+        $error = 'Connection error: Make sure Node.js WhatsApp API is running';
     }
 }
 
@@ -294,7 +284,7 @@ function handleDisconnectDevice()
                 'user_id' => $currentUser['id']
             ]);
         } else {
-            $error = 'Device status updated, but API disconnect failed: ' . $result['error'];
+            $error = 'Device status updated, but API disconnect failed: ' . ($result['error'] ?? 'Unknown error');
         }
     } catch (Exception $e) {
         // Update status even if exception occurs
@@ -330,24 +320,57 @@ function handleDeleteDevice()
 
     try {
         // Try to disconnect first if active
-        if ($device['status'] === 'connected' || $device['status'] === 'connecting') {
-            $apiClient->disconnectSession($device['session_id']);
+        if (isset($device['status']) && ($device['status'] === 'connected' || $device['status'] === 'connecting')) {
+            try {
+                $apiClient->disconnectSession($device['session_id']);
+            } catch (Exception $e) {
+                // Log but continue with deletion
+                logError("Failed to disconnect session before delete", [
+                    'device_id' => $deviceId,
+                    'session_id' => $device['session_id'] ?? 'unknown',
+                    'error' => $e->getMessage()
+                ]);
+            }
         }
 
         // Delete the device
         $result = $deviceManager->deleteDevice($deviceId);
 
-        if ($result['success']) {
+        // Handle different return types from deleteDevice()
+        if ($result === true || $result > 0) {
+            // Success - deleteDevice returned true or affected rows > 0
             $success = 'Device deleted successfully.';
 
             logInfo("Device Deleted", [
                 'device_id' => $deviceId,
-                'device_name' => $device['device_name'],
-                'session_id' => $device['session_id'],
+                'device_name' => $device['device_name'] ?? 'unknown',
+                'session_id' => $device['session_id'] ?? 'unknown',
                 'user_id' => $currentUser['id']
             ]);
+        } elseif (is_array($result)) {
+            // If returns array with format ['success' => bool, 'error' => string]
+            if (isset($result['success']) && $result['success']) {
+                $success = 'Device deleted successfully.';
+
+                logInfo("Device Deleted", [
+                    'device_id' => $deviceId,
+                    'device_name' => $device['device_name'] ?? 'unknown',
+                    'session_id' => $device['session_id'] ?? 'unknown',
+                    'user_id' => $currentUser['id']
+                ]);
+            } else {
+                $error = 'Failed to delete device: ' . ($result['error'] ?? 'Unknown error');
+            }
         } else {
-            $error = 'Failed to delete device: ' . $result['error'];
+            // Failed - deleteDevice returned false, 0, or null
+            $error = 'Failed to delete device. Please try again.';
+
+            logError("Device Deletion Failed", [
+                'device_id' => $deviceId,
+                'result_type' => gettype($result),
+                'result_value' => var_export($result, true),
+                'user_id' => $currentUser['id']
+            ]);
         }
     } catch (Exception $e) {
         logError("Device Deletion Error", [
@@ -358,3 +381,5 @@ function handleDeleteDevice()
         $error = 'An error occurred while deleting the device. Please try again.';
     }
 }
+
+// End of file - no additional functions or duplicate code

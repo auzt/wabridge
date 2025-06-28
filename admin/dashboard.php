@@ -427,7 +427,7 @@ try {
     <nav class="nav">
         <ul>
             <li><a href="dashboard.php" class="active">Dashboard</a></li>
-            <li><a href="devices.php">Devices</a></li>
+            <li><a href="device/">Devices</a></li>
             <li><a href="messages.php">Messages</a></li>
             <li><a href="webhooks.php">Webhooks</a></li>
         </ul>
@@ -506,12 +506,12 @@ try {
             <div class="card">
                 <div class="card-header">
                     Recent Devices
-                    <a href="devices.php" class="btn" style="float: right; font-size: 0.8rem; padding: 0.25rem 0.5rem;">View All</a>
+                    <a href="device/" class="btn" style="float: right; font-size: 0.8rem; padding: 0.25rem 0.5rem;">View All</a>
                 </div>
                 <div class="card-body">
                     <?php if (empty($recentDevices)): ?>
                         <p style="color: #666; text-align: center; padding: 2rem;">
-                            No devices found. <a href="devices.php">Create your first device</a>
+                            No devices found. <a href="device/">Create your first device</a>
                         </p>
                     <?php else: ?>
                         <ul class="device-list">
@@ -588,7 +588,7 @@ try {
             <div class="card-header">Quick Actions</div>
             <div class="card-body">
                 <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-                    <a href="devices.php?action=create" class="btn btn-success">+ Create New Device</a>
+                    <a href="device/?action=create" class="btn btn-success">+ Create New Device</a>
                     <a href="messages.php?action=send" class="btn">📱 Send Message</a>
                     <a href="webhooks.php?action=test" class="btn btn-warning">🔗 Test Webhook</a>
                     <a href="../api/status.php?action=health" class="btn" target="_blank">❤️ API Health Check</a>
