@@ -1,17 +1,13 @@
 <?php
 
 /**
- * WhatsApp Bridge API - Authentication & Session Management
+ * WhatsApp Bridge API - Authentication & QR Code
  */
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE');
+header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key');
-
-require_once __DIR__ . '/../includes/auth.php';
-require_once __DIR__ . '/../includes/functions.php';
-require_once __DIR__ . '/../includes/api_client.php';
 
 // Handle preflight OPTIONS request
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -19,261 +15,265 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// Rate limiting
-$clientIp = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-if (!checkRateLimit($clientIp)) {
-    jsonResponse(['success' => false, 'error' => 'Rate limit exceeded'], 429);
-}
-
-// API Key authentication
-$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-$apiKey = str_replace('Bearer ', '', $apiKey);
-
-if (empty($apiKey)) {
-    jsonResponse(['success' => false, 'error' => 'API key required'], 401);
-}
-
-$device = validateApiKey($apiKey);
-if (!$device) {
-    jsonResponse(['success' => false, 'error' => 'Invalid API key'], 401);
-}
-
-// Log API request
-$startTime = microtime(true);
-$method = $_SERVER['REQUEST_METHOD'];
-$endpoint = '/api/auth';
-$requestData = json_decode(file_get_contents('php://input'), true) ?: [];
+require_once __DIR__ . '/../config/config.php';
+require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/functions.php';
+require_once __DIR__ . '/../includes/api_client.php';
 
 try {
-    $apiClient = new WhatsAppApiClient($apiKey);
-    $deviceManager = new DeviceManager();
+    // Ambil action dari parameter
+    $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
-    switch ($method) {
-        case 'GET':
-            handleGetAuth($apiClient, $device);
+    if (empty($action)) {
+        jsonResponse([
+            'success' => false,
+            'error' => 'Action parameter required'
+        ], 400);
+    }
+
+    // Validasi API Key
+    $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? $_GET['api_key'] ?? '';
+
+    if (empty($apiKey)) {
+        jsonResponse([
+            'success' => false,
+            'error' => 'API key required'
+        ], 401);
+    }
+
+    // Inisialisasi database dan validasi device
+    $db = new Database();
+
+    $device = $db->fetch(
+        "SELECT d.*, u.username FROM devices d 
+         JOIN users u ON d.created_by = u.id 
+         WHERE d.api_key = ? AND d.status != 'inactive'",
+        [$apiKey]
+    );
+
+    if (!$device) {
+        jsonResponse([
+            'success' => false,
+            'error' => 'Invalid API key or device inactive'
+        ], 401);
+    }
+
+    // Update last activity
+    $db->execute(
+        "UPDATE devices SET last_activity = NOW() WHERE id = ?",
+        [$device['id']]
+    );
+
+    // Inisialisasi API Client untuk Node.js
+    $apiClient = new ApiClient();
+
+    switch ($action) {
+        case 'qr':
+            handleQRCode($apiClient, $device);
             break;
 
-        case 'POST':
-            handleAuthAction($apiClient, $deviceManager, $requestData, $device);
+        case 'status':
+            handleStatus($apiClient, $device);
+            break;
+
+        case 'logout':
+            handleLogout($apiClient, $device, $db);
             break;
 
         default:
-            jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
+            jsonResponse([
+                'success' => false,
+                'error' => 'Invalid action'
+            ], 400);
     }
 } catch (Exception $e) {
-    logError("API Error in auth.php", ['error' => $e->getMessage()]);
-    jsonResponse(['success' => false, 'error' => 'Internal server error'], 500);
-} finally {
-    // Log API call
-    $executionTime = (microtime(true) - $startTime) * 1000;
-    logApi($endpoint, $method, $requestData, [], http_response_code(), $executionTime);
+    logError("Auth API Error", [
+        'error' => $e->getMessage(),
+        'trace' => $e->getTraceAsString()
+    ]);
+
+    jsonResponse([
+        'success' => false,
+        'error' => 'Internal server error'
+    ], 500);
 }
 
-// Get authentication status
-function handleGetAuth($apiClient, $authDevice)
+function handleQRCode($apiClient, $device)
 {
     try {
-        // Get action parameter
-        $action = $_GET['action'] ?? 'status';
+        // Cek status device terlebih dahulu
+        $statusResult = $apiClient->getSessionStatus($device['session_id']);
 
-        switch ($action) {
-            case 'status':
-                handleGetStatus($apiClient, $authDevice);
-                break;
+        if (!$statusResult['success']) {
+            // Jika session belum ada, buat session baru
+            $createResult = $apiClient->createSession($device['session_id']);
+            if (!$createResult['success']) {
+                jsonResponse([
+                    'success' => false,
+                    'error' => 'Failed to create session: ' . $createResult['error']
+                ], 500);
+            }
+        }
 
-            case 'qr':
-                handleGetQRCode($apiClient, $authDevice);
-                break;
+        // Ambil QR code
+        $qrResult = $apiClient->getQRCode($device['session_id']);
 
-            case 'sessions':
-                handleGetSessions($apiClient, $authDevice);
-                break;
+        if ($qrResult['success'] && isset($qrResult['data']['qr_code'])) {
+            jsonResponse([
+                'success' => true,
+                'data' => [
+                    'qr_code' => $qrResult['data']['qr_code'],
+                    'session_id' => $device['session_id'],
+                    'status' => $statusResult['data']['status'] ?? 'connecting'
+                ]
+            ]);
+        } else {
+            // Jika QR tidak tersedia, mungkin sudah connected
+            $currentStatus = $statusResult['data']['status'] ?? 'unknown';
 
-            default:
-                jsonResponse(['success' => false, 'error' => 'Invalid action'], 400);
+            if ($currentStatus === 'CONNECTED') {
+                jsonResponse([
+                    'success' => false,
+                    'error' => 'Device already connected',
+                    'data' => [
+                        'status' => 'connected',
+                        'phone_number' => $statusResult['data']['phone_number'] ?? null
+                    ]
+                ]);
+            } else {
+                jsonResponse([
+                    'success' => false,
+                    'error' => 'QR code not available. ' . ($qrResult['error'] ?? 'Please try again.')
+                ]);
+            }
         }
     } catch (Exception $e) {
-        logError("Error handling GET auth", ['error' => $e->getMessage()]);
-        jsonResponse(['success' => false, 'error' => 'Failed to process request'], 500);
+        logError("QR Code Error", [
+            'device_id' => $device['id'],
+            'session_id' => $device['session_id'],
+            'error' => $e->getMessage()
+        ]);
+
+        jsonResponse([
+            'success' => false,
+            'error' => 'Failed to get QR code: ' . $e->getMessage()
+        ], 500);
     }
 }
 
-// Get session status
-function handleGetStatus($apiClient, $authDevice)
-{
-    $result = $apiClient->getSessionStatus($authDevice['session_id']);
-
-    if (!$result['success']) {
-        jsonResponse(['success' => false, 'error' => $result['error']], 500);
-    }
-
-    jsonResponse([
-        'success' => true,
-        'data' => [
-            'session_id' => $authDevice['session_id'],
-            'device_name' => $authDevice['device_name'],
-            'status' => $result['status'],
-            'node_status' => $result['node_status'],
-            'phone_number' => $result['phone'],
-            'last_activity' => $authDevice['last_activity']
-        ]
-    ]);
-}
-
-// Get QR Code
-function handleGetQRCode($apiClient, $authDevice)
-{
-    $result = $apiClient->getQRCode($authDevice['session_id']);
-
-    if (!$result['success']) {
-        jsonResponse(['success' => false, 'error' => $result['error']], 500);
-    }
-
-    jsonResponse([
-        'success' => true,
-        'data' => [
-            'session_id' => $authDevice['session_id'],
-            'qr_code' => $result['qr_code'],
-            'qr_url' => $result['qr_url']
-        ]
-    ]);
-}
-
-// Get all sessions
-function handleGetSessions($apiClient, $authDevice)
-{
-    $result = $apiClient->getAllSessions();
-
-    if (!$result['success']) {
-        jsonResponse(['success' => false, 'error' => $result['error']], 500);
-    }
-
-    jsonResponse([
-        'success' => true,
-        'data' => $result['sessions']
-    ]);
-}
-
-// Handle authentication actions
-function handleAuthAction($apiClient, $deviceManager, $data, $authDevice)
+function handleStatus($apiClient, $device)
 {
     try {
-        $action = $data['action'] ?? 'connect';
+        $result = $apiClient->getSessionStatus($device['session_id']);
 
-        switch ($action) {
-            case 'connect':
-                handleConnect($apiClient, $authDevice);
-                break;
+        if ($result['success']) {
+            $status = $result['data']['status'] ?? 'unknown';
+            $phoneNumber = $result['data']['phone_number'] ?? null;
 
-            case 'disconnect':
-                handleDisconnect($apiClient, $deviceManager, $authDevice);
-                break;
+            // Map status dari Node.js ke format PHP
+            $mappedStatus = mapNodeStatus($status);
 
-            case 'restart':
-                handleRestart($apiClient, $deviceManager, $authDevice);
-                break;
+            // Update status di database jika berbeda
+            global $db;
+            $currentDevice = $db->fetch("SELECT status, phone_number FROM devices WHERE id = ?", [$device['id']]);
 
-            case 'logout':
-                handleLogout($apiClient, $deviceManager, $authDevice);
-                break;
+            if ($currentDevice['status'] !== $mappedStatus || $currentDevice['phone_number'] !== $phoneNumber) {
+                $db->execute(
+                    "UPDATE devices SET status = ?, phone_number = ?, last_activity = NOW() WHERE id = ?",
+                    [$mappedStatus, $phoneNumber, $device['id']]
+                );
+            }
 
-            default:
-                jsonResponse(['success' => false, 'error' => 'Invalid action'], 400);
+            jsonResponse([
+                'success' => true,
+                'data' => [
+                    'status' => $mappedStatus,
+                    'phone_number' => $phoneNumber,
+                    'session_id' => $device['session_id'],
+                    'last_activity' => date('Y-m-d H:i:s')
+                ]
+            ]);
+        } else {
+            jsonResponse([
+                'success' => false,
+                'error' => 'Failed to get status: ' . $result['error']
+            ], 500);
         }
     } catch (Exception $e) {
-        logError("Error handling auth action", ['error' => $e->getMessage()]);
-        jsonResponse(['success' => false, 'error' => 'Failed to process action'], 500);
+        logError("Status Check Error", [
+            'device_id' => $device['id'],
+            'session_id' => $device['session_id'],
+            'error' => $e->getMessage()
+        ]);
+
+        jsonResponse([
+            'success' => false,
+            'error' => 'Failed to check status: ' . $e->getMessage()
+        ], 500);
     }
 }
 
-// Connect session
-function handleConnect($apiClient, $authDevice)
+function handleLogout($apiClient, $device, $db)
 {
-    $result = $apiClient->connectSession($authDevice['session_id']);
+    try {
+        $result = $apiClient->disconnectSession($device['session_id']);
 
-    if (!$result['success']) {
-        jsonResponse(['success' => false, 'error' => $result['error']], 500);
+        // Update status di database menjadi disconnected
+        $db->execute(
+            "UPDATE devices SET status = 'disconnected', phone_number = NULL, last_activity = NOW() WHERE id = ?",
+            [$device['id']]
+        );
+
+        if ($result['success']) {
+            jsonResponse([
+                'success' => true,
+                'message' => 'Device logged out successfully'
+            ]);
+        } else {
+            jsonResponse([
+                'success' => false,
+                'error' => 'Failed to logout: ' . $result['error']
+            ], 500);
+        }
+    } catch (Exception $e) {
+        logError("Logout Error", [
+            'device_id' => $device['id'],
+            'session_id' => $device['session_id'],
+            'error' => $e->getMessage()
+        ]);
+
+        jsonResponse([
+            'success' => false,
+            'error' => 'Failed to logout: ' . $e->getMessage()
+        ], 500);
     }
-
-    jsonResponse([
-        'success' => true,
-        'message' => 'Connection initiated',
-        'data' => [
-            'session_id' => $authDevice['session_id'],
-            'status' => 'connecting'
-        ]
-    ]);
 }
 
-// Disconnect session
-function handleDisconnect($apiClient, $deviceManager, $authDevice)
+function mapNodeStatus($nodeStatus)
 {
-    $result = $apiClient->disconnectSession($authDevice['session_id']);
+    $statusMap = [
+        'CONNECTING' => 'connecting',
+        'CONNECTED' => 'connected',
+        'DISCONNECTED' => 'disconnected',
+        'BANNED' => 'banned',
+        'QR_GENERATED' => 'connecting',
+        'TIMEOUT' => 'disconnected'
+    ];
 
-    if (!$result['success']) {
-        jsonResponse(['success' => false, 'error' => $result['error']], 500);
-    }
-
-    // Update device status in database
-    $deviceManager->updateDeviceStatus($authDevice['id'], 'disconnected');
-
-    jsonResponse([
-        'success' => true,
-        'message' => 'Session disconnected',
-        'data' => [
-            'session_id' => $authDevice['session_id'],
-            'status' => 'disconnected'
-        ]
-    ]);
+    return $statusMap[$nodeStatus] ?? 'unknown';
 }
 
-// Restart session
-function handleRestart($apiClient, $deviceManager, $authDevice)
+// Helper function untuk validasi dan log
+function logApiRequest($device, $action, $result)
 {
-    // First disconnect
-    $disconnectResult = $apiClient->disconnectSession($authDevice['session_id']);
+    $logData = [
+        'timestamp' => date('Y-m-d H:i:s'),
+        'device_id' => $device['id'],
+        'session_id' => $device['session_id'],
+        'action' => $action,
+        'success' => $result['success'],
+        'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+    ];
 
-    // Wait a moment
-    sleep(2);
-
-    // Then reconnect
-    $connectResult = $apiClient->connectSession($authDevice['session_id']);
-
-    if (!$connectResult['success']) {
-        jsonResponse(['success' => false, 'error' => $connectResult['error']], 500);
-    }
-
-    // Update device status in database
-    $deviceManager->updateDeviceStatus($authDevice['id'], 'connecting');
-
-    jsonResponse([
-        'success' => true,
-        'message' => 'Session restarted',
-        'data' => [
-            'session_id' => $authDevice['session_id'],
-            'status' => 'connecting'
-        ]
-    ]);
-}
-
-// Logout session (disconnect and clear data)
-function handleLogout($apiClient, $deviceManager, $authDevice)
-{
-    // Create Node.js API client
-    $nodeApi = new NodeApiClient($authDevice['api_key']);
-
-    // Logout from Node.js API
-    $response = $nodeApi->logoutSession($authDevice['session_id']);
-
-    // Update device status regardless of Node.js response
-    $deviceManager->updateDeviceStatus($authDevice['id'], 'disconnected', null, null);
-
-    jsonResponse([
-        'success' => true,
-        'message' => 'Session logged out and data cleared',
-        'data' => [
-            'session_id' => $authDevice['session_id'],
-            'status' => 'disconnected'
-        ]
-    ]);
+    logInfo("Auth API Request", $logData);
 }

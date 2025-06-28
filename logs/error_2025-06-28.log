@@ -32,3 +32,7 @@
 [2025-06-28 11:14:37] ERROR: Error getting QR code - Context: {"error":"Failed to get QR code"}
 [2025-06-28 21:06:57] ERROR: Error in health check - Context: {"error":"cURL Error: Failed to connect to localhost port 3000: Connection refused"}
 [2025-06-28 21:07:14] ERROR: Error getting QR code - Context: {"error":"Failed to get QR code"}
+[2025-06-28 21:10:37] ERROR: Error disconnecting session - Context: {"error":"Failed to disconnect session"}
+[2025-06-28 21:10:57] ERROR: Error getting QR code - Context: {"error":"Failed to get QR code"}
+[2025-06-28 21:11:01] ERROR: Error getting QR code - Context: {"error":"Failed to get QR code"}
+[2025-06-28 21:11:38] ERROR: Error getting QR code - Context: {"error":"Failed to get QR code"}
