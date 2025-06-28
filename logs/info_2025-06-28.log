@@ -1,0 +1,11 @@
+[2025-06-28 10:33:42] INFO: User logged in - Context: {"username":"admin"}
+[2025-06-28 10:40:14] INFO: Device created - Context: {"device_name":"asd","session_id":"wa_1751082014_7692","note":""}
+[2025-06-28 10:40:29] INFO: Device deleted - Context: {"device_id":1,"device_name":"asd"}
+[2025-06-28 10:40:39] INFO: Device created - Context: {"device_name":"dasdas","session_id":"wa_1751082039_2809","note":""}
+[2025-06-28 10:42:01] INFO: Device deleted - Context: {"device_id":2,"device_name":"dasdas"}
+[2025-06-28 10:43:59] INFO: Device created - Context: {"device_name":"da","session_id":"wa_1751082239_1025","note":""}
+[2025-06-28 11:06:30] INFO: Device status updated - Context: {"device_id":3,"status":"connecting","phone_number":null}
+[2025-06-28 11:07:58] INFO: Device deleted - Context: {"device_id":3,"device_name":"da"}
+[2025-06-28 11:10:36] INFO: Device created - Context: {"device_name":"dsa","session_id":"wa_1751083836_7388","note":""}
+[2025-06-28 11:12:47] INFO: Device status updated - Context: {"device_id":4,"status":"connecting","phone_number":null}
+[2025-06-28 21:06:55] INFO: User logged in - Context: {"username":"admin"}

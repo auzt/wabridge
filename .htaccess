@@ -1,0 +1,39 @@
+# WhatsApp Bridge - Apache Configuration
+
+# Enable rewrite engine
+RewriteEngine On
+
+# Get the base path
+RewriteBase /wabridge/
+
+# Security headers (only those allowed in .htaccess)
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options nosniff
+    Header always set X-Frame-Options DENY
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Prevent access to sensitive files
+<FilesMatch "\.(env|log|ini|conf|sql|md)$">
+    Require all denied
+</FilesMatch>
+
+# Block access to config directory
+RewriteRule ^config/ - [F,L]
+RewriteRule ^includes/ - [F,L]
+RewriteRule ^logs/ - [F,L]
+RewriteRule ^database/ - [F,L]
+
+# API routes
+RewriteRule ^api/devices/?$ api/devices.php [L,QSA]
+RewriteRule ^api/messages/?$ api/messages.php [L,QSA]
+RewriteRule ^api/webhook/?$ api/webhook.php [L,QSA]
+RewriteRule ^api/auth/?$ api/auth.php [L,QSA]
+RewriteRule ^api/status/?$ api/status.php [L,QSA]
+
+# Webhook receiver
+RewriteRule ^webhook/?$ webhooks/receiver.php [L,QSA]
+
+# Disable directory browsing
+Options -Indexes
